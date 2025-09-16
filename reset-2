@@ -1,23 +1,33 @@
 #!/bin/bash
 set -e
 
-echo ">>> Удаляем установленные пакеты..."
-sudo pacman -Rns --noconfirm \
-    bspwm sxhkd polybar picom \
-    hyprland waybar foot \
-    xdg-desktop-portal-hyprland \
-    grim slurp wl-clipboard \
-    rofi dmenu feh lxappearance \
-    alacritty kitty \
-    firefox chromium \
-    thunar thunar-volman file-roller gvfs gvfs-mtp \
-    mpv vlc xfce4-taskmanager \
-    bluez bluez-utils blueman \
-    pipewire pipewire-alsa pipewire-pulse pipewire-jack wireplumber pavucontrol \
-    neovim nano micro htop btop ranger \
-    ttf-dejavu ttf-liberation noto-fonts noto-fonts-cjk noto-fonts-emoji \
-    zsh lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings \
-    exa bat
+echo ">>> Удаляем пакеты (только если они есть)..."
+PACKAGES=(
+  bspwm sxhkd polybar picom
+  hyprland waybar foot
+  xdg-desktop-portal-hyprland
+  grim slurp wl-clipboard
+  rofi dmenu feh lxappearance
+  alacritty kitty
+  firefox chromium
+  thunar thunar-volman file-roller gvfs gvfs-mtp
+  mpv vlc xfce4-taskmanager
+  bluez bluez-utils blueman
+  pipewire pipewire-alsa pipewire-pulse pipewire-jack wireplumber pavucontrol
+  neovim nano micro htop btop ranger
+  ttf-dejavu ttf-liberation noto-fonts noto-fonts-cjk noto-fonts-emoji
+  zsh lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings
+  exa bat
+)
+
+for pkg in "${PACKAGES[@]}"; do
+  if pacman -Qi "$pkg" &>/dev/null; then
+    echo ">>> Удаляем: $pkg"
+    sudo pacman -Rns --noconfirm "$pkg"
+  else
+    echo "Пропускаем (не установлен): $pkg"
+  fi
+done
 
 echo ">>> Чистим конфиги..."
 rm -rf ~/.config/{bspwm,sxhkd,polybar,picom,hypr}
@@ -33,7 +43,9 @@ chsh -s /bin/bash
 
 echo ">>> Отключаем LightDM..."
 sudo systemctl disable lightdm || true
-sudo pacman -Rns --noconfirm lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings
+if pacman -Qi lightdm &>/dev/null; then
+  sudo pacman -Rns --noconfirm lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings
+fi
 
 echo ">>> Очистка завершена!"
-echo "Система сброшена. Можно перезагрузиться: sudo reboot"
+echo "Перезагрузи систему: sudo reboot"
