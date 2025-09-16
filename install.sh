@@ -1,47 +1,66 @@
 #!/bin/bash
+set -e
 
-echo ">>> Установка начинается..."
+echo ">>> Обновляем систему..."
+sudo pacman -Syu --noconfirm
 
-# === Создание нужных папок ===
-sudo mkdir -p /usr/share/icons
-sudo mkdir -p /usr/share/themes
-sudo mkdir -p /usr/share/backgrounds
-mkdir -p ~/.config
+# === Базовые пакеты (минимум) ===
+echo ">>> Устанавливаем базовые пакеты..."
+sudo pacman -S --noconfirm --needed \
+    base-devel git wget curl \
+    networkmanager \
+    xdg-user-dirs xdg-utils \
+    neovim nano
 
-# === Установка BSPWM dotfiles ===
-echo ">>> Скачиваю и устанавливаю bspwm-dots..."
-git clone https://github.com/mmsaeed509/bspwm-dots.git
-cd bspwm-dots
-chmod +x install_arch_packages
-sudo ./install_arch_packages
-cp misc/* ~/
-sudo cp bin/* /bin
-cp -r config/* ~/.config
-cd ..
-rm -rf bspwm-dots
+# === Включаем сеть ===
+echo ">>> Включаем NetworkManager..."
+sudo systemctl enable NetworkManager --now
 
-# === Установка обоев ===
-echo ">>> Скачиваю и устанавливаю обои..."
-git clone https://github.com/Exodia-OS/exodia-backgrounds.git
-cd exodia-backgrounds/backgrounds
-sudo cp -r * /usr/share/backgrounds/
-cd ../..
-rm -rf exodia-backgrounds
+# === Xorg + драйверы (для совместимости) ===
+echo ">>> Устанавливаем Xorg и драйверы..."
+sudo pacman -S --noconfirm --needed \
+    xorg xorg-xinit mesa mesa-demos \
+    vulkan-icd-loader \
+    amd-ucode intel-ucode \
+    nvidia nvidia-utils nvidia-settings lib32-nvidia-utils nvidia-prime
 
-# === Установка иконок ===
-echo ">>> Скачиваю и устанавливаю иконки..."
-git clone https://github.com/Exodia-OS/exodia-icons.git
-cd exodia-icons/files
-sudo cp -r * /usr/share/icons/
-cd ../..
-rm -rf exodia-icons
+# === Hyprland ===
+echo ">>> Устанавливаем Hyprland..."
+sudo pacman -S --noconfirm --needed \
+    hyprland waybar foot \
+    xdg-desktop-portal xdg-desktop-portal-hyprland \
+    grim slurp wl-clipboard \
+    qt5-wayland qt6-wayland gtk3 gtk4
 
-# === Установка тем ===
-echo ">>> Скачиваю и устанавливаю темы..."
-git clone https://github.com/Exodia-OS/exodia-themes.git
-cd exodia-themes/files
-sudo cp -r * /usr/share/themes/
-cd ../..
-rm -rf exodia-themes
+# === LightDM (для входа в систему) ===
+echo ">>> Устанавливаем LightDM..."
+sudo pacman -S --noconfirm --needed lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings
+sudo sed -i 's/^#greeter-session=.*/greeter-session=lightdm-gtk-greeter/' /etc/lightdm/lightdm.conf || true
+sudo systemctl enable lightdm
 
-echo ">>> Установка завершена! Перезапусти сессию и включи BSPWM."
+# === Hyprland desktop entry ===
+sudo tee /usr/share/wayland-sessions/hyprland.desktop > /dev/null <<EOF
+[Desktop Entry]
+Name=Hyprland
+Comment=Dynamic tiling Wayland compositor
+Exec=Hyprland
+Type=Application
+EOF
+
+# === Минимальная настройка Hyprland ===
+mkdir -p ~/.config/hypr
+
+cat > ~/.config/hypr/hyprland.conf <<EOF
+monitor=,preferred,auto,auto
+
+input {
+    kb_layout = us,ru
+    kb_options = grp:alt_shift_toggle
+}
+
+exec-once = foot
+EOF
+
+echo ">>> Минимальная установка завершена!"
+echo "Перезагрузи систему: sudo reboot"
+echo "На экране входа выбери Hyprland."
