@@ -1,0 +1,181 @@
+#!/bin/bash
+set -e
+
+echo ">>> Обновляем систему..."
+sudo pacman -Syu --noconfirm
+
+# === Базовые пакеты ===
+echo ">>> Устанавливаем базовые пакеты..."
+sudo pacman -S --noconfirm --needed \
+    base-devel git wget curl unzip zip \
+    neovim nano micro htop btop ranger \
+    networkmanager network-manager-applet \
+    pipewire pipewire-pulse pipewire-alsa pipewire-jack wireplumber pavucontrol \
+    xdg-user-dirs xdg-utils \
+    feh rofi dmenu lxappearance \
+    alacritty kitty \
+    firefox chromium \
+    thunar thunar-volman file-roller gvfs gvfs-mtp \
+    bluez bluez-utils blueman \
+    mpv vlc xfce4-taskmanager \
+    ttf-dejavu ttf-liberation noto-fonts noto-fonts-cjk noto-fonts-emoji \
+    unzip p7zip unrar zsh
+
+# === Xorg + драйверы ===
+echo ">>> Устанавливаем Xorg и драйверы..."
+sudo pacman -S --noconfirm --needed \
+    xorg xorg-xinit xorg-server mesa mesa-demos \
+    vulkan-icd-loader \
+    vulkan-radeon lib32-vulkan-radeon \
+    vulkan-intel lib32-vulkan-intel \
+    nvidia nvidia-utils nvidia-settings lib32-nvidia-utils nvidia-prime \
+    amd-ucode intel-ucode
+
+# === BSPWM ===
+echo ">>> Устанавливаем BSPWM..."
+sudo pacman -S --noconfirm bspwm sxhkd polybar picom
+
+# === Hyprland ===
+echo ">>> Устанавливаем Hyprland..."
+sudo pacman -S --noconfirm \
+    hyprland waybar foot \
+    xdg-desktop-portal xdg-desktop-portal-hyprland \
+    grim slurp wl-clipboard \
+    qt5-wayland qt6-wayland gtk3 gtk4
+
+# === LightDM ===
+echo ">>> Устанавливаем и настраиваем LightDM..."
+sudo pacman -S --noconfirm lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings
+sudo sed -i 's/^#greeter-session=.*/greeter-session=lightdm-gtk-greeter/' /etc/lightdm/lightdm.conf || true
+sudo systemctl enable lightdm
+
+# BSPWM desktop entry
+sudo tee /usr/share/xsessions/bspwm.desktop > /dev/null <<EOF
+[Desktop Entry]
+Name=BSPWM
+Comment=Binary space partitioning window manager
+Exec=bspwm
+Type=Application
+EOF
+
+# Hyprland desktop entry
+sudo tee /usr/share/wayland-sessions/hyprland.desktop > /dev/null <<EOF
+[Desktop Entry]
+Name=Hyprland
+Comment=Dynamic tiling Wayland compositor
+Exec=Hyprland
+Type=Application
+EOF
+
+# === Настройка раскладки ===
+echo ">>> Настраиваем раскладку клавиатуры..."
+sudo pacman -S --noconfirm xorg-setxkbmap
+mkdir -p ~/.config/{bspwm,sxhkd,polybar,picom,hypr}
+
+cat > ~/.config/bspwm/bspwmrc <<EOF
+#!/bin/sh
+sxhkd &
+picom --config ~/.config/picom/picom.conf &
+polybar example &
+feh --bg-fill ~/Pictures/wallpapers/default.jpg &
+
+# Раскладка: Alt+Shift
+setxkbmap -layout "us,ru" -option "grp:alt_shift_toggle"
+
+# Запуск терминала
+alacritty &
+EOF
+chmod +x ~/.config/bspwm/bspwmrc
+
+cat > ~/.config/hypr/hyprland.conf <<EOF
+monitor=,preferred,auto,auto
+
+input {
+    kb_layout = us,ru
+    kb_options = grp:alt_shift_toggle
+}
+EOF
+
+# === Polybar config ===
+cat > ~/.config/polybar/config.ini <<EOF
+[bar/example]
+width = 100%
+height = 24
+background = #222
+foreground = #fff
+font-0 = "FiraCode Nerd Font:size=10"
+modules-left = bspwm
+modules-right = pulseaudio date
+
+[module/bspwm]
+type = internal/bspwm
+
+[module/pulseaudio]
+type = internal/pulseaudio
+
+[module/date]
+type = internal/date
+interval = 1
+date = %Y-%m-%d %H:%M
+EOF
+
+# === Picom config ===
+cat > ~/.config/picom/picom.conf <<EOF
+backend = "glx";
+vsync = true;
+shadow = true;
+fading = true;
+EOF
+
+# === Обои, темы, иконки ===
+echo ">>> Скачиваем Exodia backgrounds..."
+git clone https://github.com/Exodia-OS/exodia-backgrounds.git
+sudo cp -r exodia-backgrounds/backgrounds/* /usr/share/backgrounds/
+rm -rf exodia-backgrounds
+
+echo ">>> Скачиваем Exodia icons..."
+git clone https://github.com/Exodia-OS/exodia-icons.git
+sudo cp -r exodia-icons/files/* /usr/share/icons/
+rm -rf exodia-icons
+
+echo ">>> Скачиваем Exodia themes..."
+git clone https://github.com/Exodia-OS/exodia-themes.git
+sudo cp -r exodia-themes/files/* /usr/share/themes/
+rm -rf exodia-themes
+
+# === Oh My Zsh + Powerlevel10k ===
+echo ">>> Устанавливаем Oh My Zsh..."
+export RUNZSH=no
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+
+echo ">>> Устанавливаем Powerlevel10k..."
+git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ~/.oh-my-zsh/custom/themes/powerlevel10k
+
+echo ">>> Устанавливаем плагины для Zsh..."
+git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions
+git clone https://github.com/zsh-users/zsh-syntax-highlighting ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
+
+# Настройка .zshrc (если есть)
+if [ -f ~/.zshrc ]; then
+  sed -i 's|ZSH_THEME=".*"|ZSH_THEME="powerlevel10k/powerlevel10k"|' ~/.zshrc
+  sed -i 's|plugins=(.*)|plugins=(git zsh-autosuggestions zsh-syntax-highlighting)|' ~/.zshrc
+else
+  cat > ~/.zshrc <<EORC
+export ZSH="\$HOME/.oh-my-zsh"
+ZSH_THEME="powerlevel10k/powerlevel10k"
+plugins=(git zsh-autosuggestions zsh-syntax-highlighting)
+source \$ZSH/oh-my-zsh.sh
+EORC
+fi
+
+chsh -s /bin/zsh
+
+# === Создание стандартных папок и обоев ===
+xdg-user-dirs-update
+mkdir -p ~/Pictures/wallpapers
+wget -O ~/Pictures/wallpapers/default.jpg https://i.imgur.com/1ZQZ1Zq.jpg
+
+echo ">>> Установка завершена!"
+echo "Перезагрузи компьютер: sudo reboot"
+echo "На экране входа выбери BSPWM или Hyprland."
+echo "При первом запуске Zsh будет настройка Powerlevel10k."
