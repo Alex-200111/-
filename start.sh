@@ -1,137 +1,180 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo ">>> Обновление системы..."
+# Настройки
+FORCE_CLONE=false          # true - удаляет старые клоны перед git clone
+INSTALL_HYPRLAND=false     # true - пробовать ставить Hyprland (можно включить вручную)
+PACKAGES_EXTRA=()          # сюда можно добавить свои пакеты
+
+info(){ echo ">>> $*"; }
+
+# Проверка сети (github)
+if ! ping -c1 8.8.8.8 >/dev/null 2>&1; then
+  echo "Нет интернета! Подключись и попробуй снова."
+  exit 1
+fi
+
+info "Обновление базы pacman..."
 sudo pacman -Syu --noconfirm
 
-# === БАЗОВЫЕ ПАКЕТЫ ===
-echo ">>> Установка базовых пакетов..."
-sudo pacman -S --noconfirm \
-    base-devel git wget curl unzip zip \
-    neovim nano micro htop btop ranger \
-    networkmanager network-manager-applet \
-    pulseaudio pavucontrol pipewire pipewire-pulse alsa-utils \
-    xdg-user-dirs xdg-utils
+# --- Базовые пакеты (список) ---
+PACKAGES=(
+  base-devel git wget curl unzip zip
+  neovim nano micro htop btop ranger
+  networkmanager network-manager-applet
+  pipewire pipewire-pulse pipewire-alsa pipewire-jack wireplumber pavucontrol
+  xdg-user-dirs xdg-utils
+  feh rofi dmenu lxappearance
+  alacritty kitty
+  firefox chromium
+  thunar thunar-volman file-roller gvfs gvfs-mtp
+  bluez bluez-utils blueman
+  mpv vlc xfce4-taskmanager
+  ttf-dejavu ttf-liberation noto-fonts noto-fonts-cjk noto-fonts-emoji
+  unzip p7zip unrar zsh
+)
+PACKAGES+=("${PACKAGES_EXTRA[@]}")
 
-# === Xorg + драйверы ===
-echo ">>> Установка Xorg и драйверов..."
-sudo pacman -S --noconfirm \
-    xorg xorg-xinit xorg-server \
-    mesa vulkan-intel vulkan-radeon nvidia nvidia-utils
+# Попытка массовой установки, если падает — пробуем по одному
+info "Устанавливаем базовые пакеты..."
+if ! sudo pacman -S --noconfirm --needed "${PACKAGES[@]}"; then
+  info "Пробую ставить по одному, чтобы пропускать отсутствующие пакеты..."
+  for p in "${PACKAGES[@]}"; do
+    if ! sudo pacman -S --noconfirm --needed "$p"; then
+      echo "  (пропущен) $p"
+    fi
+  done
+fi
 
-# === BSPWM ===
-echo ">>> Установка BSPWM + инструменты..."
-sudo pacman -S --noconfirm \
-    bspwm sxhkd polybar rofi picom feh dmenu \
-    lxappearance papirus-icon-theme alacritty
+# --- Определяем GPU и ставим драйверы только нужные ---
+info "Определяем GPU..."
+GPU_INFO="$(lspci 2>/dev/null || true)"
+DRIVERS=(mesa vulkan-icd-loader)
+if echo "$GPU_INFO" | grep -qi nvidia; then
+  info "NVIDIA обнаружена -> установлю nvidia пакеты"
+  DRIVERS=(nvidia nvidia-utils nvidia-settings lib32-nvidia-utils nvidia-prime)
+elif echo "$GPU_INFO" | grep -Ei "amd|radeon" >/dev/null; then
+  info "AMD обнаружена -> установлю mesa + vulkan-radeon"
+  DRIVERS+=(vulkan-radeon lib32-vulkan-radeon amd-ucode)
+elif echo "$GPU_INFO" | grep -Ei "intel" >/dev/null; then
+  info "Intel обнаружен -> установлю mesa + vulkan-intel"
+  DRIVERS+=(vulkan-intel lib32-vulkan-intel intel-ucode)
+else
+  info "GPU не определён точно — ставлю Mesa (универсально)."
+fi
 
-# === Hyprland ===
-echo ">>> Установка Hyprland + инструменты..."
-sudo pacman -S --noconfirm \
-    hyprland waybar rofi foot \
-    xdg-desktop-portal xdg-desktop-portal-hyprland \
-    grim slurp wl-clipboard \
-    qt5-wayland qt6-wayland gtk3 gtk4
+info "Устанавливаю драйверы: ${DRIVERS[*]}"
+if ! sudo pacman -S --noconfirm --needed "${DRIVERS[@]}"; then
+  echo "Внимание: не все драйверы установлены (возможно пакет отсутствует в репо)."
+fi
 
-# === LightDM ===
-echo ">>> Установка LightDM..."
-sudo pacman -S --noconfirm lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings
+# --- Xorg + утилиты (нужны для bspwm) ---
+info "Устанавливаем Xorg и утилиты..."
+sudo pacman -S --noconfirm --needed xorg xorg-xinit xorg-server xorg-setxkbmap xorg-xprop xorg-xrandr
+
+# --- BSPWM и утилиты ---
+info "Устанавливаем BSPWM + утилиты..."
+sudo pacman -S --noconfirm --needed bspwm sxhkd polybar picom
+
+# --- Hyprland (опционально) ---
+if [ "${INSTALL_HYPRLAND}" = true ]; then
+  info "Попытка установить Hyprland (опция включена)..."
+  if ! sudo pacman -S --noconfirm --needed hyprland waybar foot xdg-desktop-portal xdg-desktop-portal-wlr grim slurp wl-clipboard qt5-wayland qt6-wayland gtk3 gtk4; then
+    echo "Hyprland либо недоступен в репозитории — нужно ставить из AUR вручную."
+  fi
+else
+  info "Hyprland пропущён (INSTALL_HYPRLAND=false)."
+fi
+
+# --- LightDM и greeter ---
+info "Устанавливаем LightDM..."
+sudo pacman -S --noconfirm --needed lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings
+# создаём conf.d файл чтобы гарантированно применить greeter
+sudo mkdir -p /etc/lightdm/lightdm.conf.d
+sudo tee /etc/lightdm/lightdm.conf.d/50-my-greeter.conf > /dev/null <<EOF
+[Seat:*]
+greeter-session=lightdm-gtk-greeter
+# don't autologin by default
+EOF
 sudo systemctl enable lightdm
 
-# === Браузеры ===
-echo ">>> Установка браузеров..."
-sudo pacman -S --noconfirm firefox chromium
-
-# === Файловый менеджер ===
-echo ">>> Установка файлового менеджера..."
-sudo pacman -S --noconfirm thunar thunar-volman
-
-# === Bluetooth ===
-echo ">>> Установка Bluetooth..."
-sudo pacman -S --noconfirm bluez bluez-utils blueman
-sudo systemctl enable bluetooth
-
-# === Шрифты ===
-echo ">>> Установка шрифтов..."
-sudo pacman -S --noconfirm \
-    ttf-dejavu ttf-liberation noto-fonts noto-fonts-cjk noto-fonts-emoji
-
-# === Файловые утилиты ===
-echo ">>> Установка файловых утилит..."
-sudo pacman -S --noconfirm gvfs gvfs-mtp file-roller unzip p7zip unrar
-
-# === Медиа ===
-echo ">>> Установка медиа-плееров..."
-sudo pacman -S --noconfirm mpv vlc
-
-# === Диспетчер задач ===
-echo ">>> Установка диспетчера задач..."
-sudo pacman -S --noconfirm xfce4-taskmanager
-
-# === Nerd Fonts ===
-echo ">>> Установка Nerd Fonts..."
-git clone --depth=1 https://github.com/ryanoasis/nerd-fonts.git
-cd nerd-fonts
-./install.sh FiraCode
-./install.sh JetBrainsMono
-./install.sh Hack
-cd ..
-rm -rf nerd-fonts
-
-# === Zsh + Oh My Zsh ===
-echo ">>> Установка Zsh и Oh My Zsh..."
-sudo pacman -S --noconfirm zsh zsh-autosuggestions zsh-syntax-highlighting
-chsh -s /bin/zsh
-export RUNZSH=no
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
-
-# Тема Powerlevel10k
-git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ~/.oh-my-zsh/custom/themes/powerlevel10k
-sed -i 's|ZSH_THEME=".*"|ZSH_THEME="powerlevel10k/powerlevel10k"|' ~/.zshrc
-sed -i 's/plugins=(git)/plugins=(git zsh-autosuggestions zsh-syntax-highlighting)/' ~/.zshrc
-
-# === Создание папок ===
-echo ">>> Создание стандартных папок пользователя..."
-xdg-user-dirs-update
-
-# === Настройка BSPWM ===
-echo ">>> Настройка BSPWM..."
-mkdir -p ~/.config/{bspwm,sxhkd,polybar,picom}
-
-cat > ~/.config/bspwm/bspwmrc <<EOF
+# --- Создаём wrapper для bspwm (чтобы sxhkd/picom/polybar запускались корректно) ---
+info "Создаю /usr/local/bin/bspwm-session ..."
+sudo tee /usr/local/bin/bspwm-session > /dev/null <<'EOS'
 #!/bin/sh
-# Запуск горячих клавиш
-sxhkd &
-# Прозрачности и тени
-picom --config ~/.config/picom/picom.conf &
-# Панель
-polybar example &
-# Обои
-feh --bg-fill ~/Pictures/wallpapers/default.jpg &
+# wrapper for display manager session
+# start hotkeys and other startup tools, then exec bspwm
+[ -x /usr/bin/sxhkd ] && setsid -f sxhkd >/dev/null 2>&1 || true
+[ -x /usr/bin/picom ] && (picom --config "$HOME/.config/picom/picom.conf" &)
+[ -x /usr/bin/polybar ] && (polybar example &)
+# source user's bspwmrc if present
+if [ -f "$HOME/.config/bspwm/bspwmrc" ]; then
+  # do not exec here; source to set env if needed
+  . "$HOME/.config/bspwm/bspwmrc"
+fi
+exec bspwm
+EOS
+sudo chmod +x /usr/local/bin/bspwm-session
 
-# === Настройка раскладки клавиатуры (Alt+Shift = глобально, Shift+Alt = окно) ===
-setxkbmap -layout "us,ru" -option "grp:alt_shift_toggle"
-xcape -e 'Shift_L=ISO_Next_Group'
+# --- Desktop entries (bspwm + hyprland if installed) ---
+info "Создаю desktop entry для bspwm..."
+sudo tee /usr/share/xsessions/bspwm.desktop > /dev/null <<EOF
+[Desktop Entry]
+Name=BSPWM
+Comment=Binary space partitioning window manager
+Exec=/usr/local/bin/bspwm-session
+Type=Application
 EOF
+
+# hyprland desktop entry (если есть бинарный hyprland)
+if command -v Hyprland >/dev/null 2>&1 || command -v hyprland >/dev/null 2>&1; then
+  HYPR_BIN="$(command -v Hyprland || true)"
+  [ -z "$HYPR_BIN" ] && HYPR_BIN="$(command -v hyprland || true)"
+  sudo mkdir -p /usr/share/wayland-sessions
+  sudo tee /usr/share/wayland-sessions/hyprland.desktop > /dev/null <<EOF
+[Desktop Entry]
+Name=Hyprland
+Comment=Dynamic tiling Wayland compositor
+Exec=${HYPR_BIN}
+Type=Application
+EOF
+  info "Hyprland desktop entry создан."
+fi
+
+# --- Раскладка и ~/.config файлы ---
+info "Создаём конфиги и раскладки..."
+mkdir -p ~/.config/{bspwm,sxhkd,polybar,picom,hyprland}
+# простой bspwmrc (пример)
+cat > ~/.config/bspwm/bspwmrc <<'BSPCM'
+#!/bin/sh
+# minimal bspwmrc
+sxhkd &
+# picom and polybar are started by wrapper too; this is fallback
+[ -x /usr/bin/picom ] && picom --config ~/.config/picom/picom.conf &
+[ -x /usr/bin/polybar ] && polybar example &
+feh --bg-fill ~/Pictures/wallpapers/default.jpg &
+# keyboard layout: Alt+Shift toggles group
+setxkbmap -layout "us,ru" -option "grp:alt_shift_toggle"
+BSPCM
 chmod +x ~/.config/bspwm/bspwmrc
 
-cat > ~/.config/sxhkd/sxhkdrc <<EOF
-super + Return
-    alacritty
+# hyprland config (если захотим hyprland)
+cat > ~/.config/hyprland/hyprland.conf <<'HYPRC'
+monitor=,preferred,auto,auto
+input {
+    kb_layout = us,ru
+    kb_options = grp:alt_shift_toggle
+}
+HYPRC
 
-super + q
-    bspc node -c
-
-super + r
-    bspc wm -r
-EOF
-
-cat > ~/.config/polybar/config.ini <<EOF
+# --- Polybar config (шрифт — из ttf-dejavu, чтобы не ломалось) ---
+cat > ~/.config/polybar/config.ini <<'POLY'
 [bar/example]
 width = 100%
 height = 24
 background = #222
 foreground = #fff
-font-0 = "FiraCode Nerd Font:size=10"
+font-0 = "DejaVu Sans Mono:size=10"
 modules-left = bspwm
 modules-right = pulseaudio date
 
@@ -145,34 +188,67 @@ type = internal/pulseaudio
 type = internal/date
 interval = 1
 date = %Y-%m-%d %H:%M
-EOF
+POLY
 
-cat > ~/.config/picom/picom.conf <<EOF
+# Picom config
+cat > ~/.config/picom/picom.conf <<'PC'
 backend = "glx";
 vsync = true;
 shadow = true;
 fading = true;
-EOF
+PC
 
-# === Настройка Hyprland ===
-echo ">>> Настройка Hyprland..."
-mkdir -p ~/.config/hypr
-cat > ~/.config/hypr/hyprland.conf <<EOF
-# Базовая настройка Hyprland
-monitor=,preferred,auto,auto
-
-input {
-    kb_layout = us,ru
-    kb_options = grp:alt_shift_toggle
+# --- Темы/иконки/обои (клонируем аккуратно) ---
+clone_and_copy(){
+  url="$1"; src_subpath="$2"; dest="$3"
+  tmpdir="$(mktemp -d)"
+  if [ "$FORCE_CLONE" = true ]; then rm -rf "$tmpdir"; fi
+  git clone --depth=1 "$url" "$tmpdir" || { echo "Не удалось клонировать $url"; rm -rf "$tmpdir"; return 1; }
+  if [ -d "$tmpdir/$src_subpath" ]; then
+    sudo mkdir -p "$dest"
+    sudo cp -r "$tmpdir/$src_subpath"/* "$dest"/ || true
+  fi
+  rm -rf "$tmpdir"
 }
-EOF
 
-# === Обои ===
-echo ">>> Загрузка дефолтных обоев..."
+info "Качаем обои/иконки/темы (если доступны)..."
+clone_and_copy "https://github.com/Exodia-OS/exodia-backgrounds.git" "backgrounds" "/usr/share/backgrounds" || true
+clone_and_copy "https://github.com/Exodia-OS/exodia-icons.git" "files" "/usr/share/icons" || true
+clone_and_copy "https://github.com/Exodia-OS/exodia-themes.git" "files" "/usr/share/themes" || true
+
+# --- Oh My Zsh (с осторожностью) ---
+info "Устанавливаем Oh My Zsh (если zsh установлен)..."
+if command -v zsh >/dev/null 2>&1; then
+  export RUNZSH=no
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" || true
+  if [ ! -d "$HOME/.oh-my-zsh/custom/themes/powerlevel10k" ]; then
+    git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$HOME/.oh-my-zsh/custom/themes/powerlevel10k" || true
+  fi
+  git clone https://github.com/zsh-users/zsh-autosuggestions "$HOME/.oh-my-zsh/custom/plugins/zsh-autosuggestions" || true
+  git clone https://github.com/zsh-users/zsh-syntax-highlighting "$HOME/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting" || true
+
+  # аккуратно правим .zshrc или создаём новый
+  if [ -f "$HOME/.zshrc" ]; then
+    sed -i 's|^ZSH_THEME=.*|ZSH_THEME="powerlevel10k/powerlevel10k"|' "$HOME/.zshrc" 2>/dev/null || true
+    if ! grep -q "zsh-autosuggestions" "$HOME/.zshrc" 2>/dev/null; then
+      echo 'plugins=(git zsh-autosuggestions zsh-syntax-highlighting)' >> "$HOME/.zshrc"
+    fi
+  else
+    cat > "$HOME/.zshrc" <<'ZRC'
+export ZSH="$HOME/.oh-my-zsh"
+ZSH_THEME="powerlevel10k/powerlevel10k"
+plugins=(git zsh-autosuggestions zsh-syntax-highlighting)
+source $ZSH/oh-my-zsh.sh
+ZRC
+  fi
+  chsh -s /bin/zsh || true
+fi
+
+# --- Стандартные папки и обои ---
+xdg-user-dirs-update || true
 mkdir -p ~/Pictures/wallpapers
-wget -O ~/Pictures/wallpapers/default.jpg https://i.imgur.com/1ZQZ1Zq.jpg
+curl -fsSL -o ~/Pictures/wallpapers/default.jpg https://i.imgur.com/1ZQZ1Zq.jpg || true
 
-# === Финал ===
-echo ">>> Установка завершена!"
-echo "Перезагрузи компьютер, выбери BSPWM или Hyprland в LightDM."
-echo "Первый запуск Zsh откроет настройку Powerlevel10k."
+info "Установка завершена!"
+echo "Перезагрузи компьютер: sudo reboot"
+echo "На экране входа выбери BSPWM или (если ставилась) Hyprland."
