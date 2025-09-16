@@ -1,23 +1,43 @@
 #!/bin/bash
 set -e
 
-echo ">>> Удаляем пакеты (только если они есть)..."
+echo ">>> Удаляем пакеты, установленные скриптом..."
+
 PACKAGES=(
-  bspwm sxhkd polybar picom
-  hyprland waybar foot
-  xdg-desktop-portal-hyprland
-  grim slurp wl-clipboard
-  rofi dmenu feh lxappearance
+  # базовые
+  base-devel git wget curl unzip zip
+  neovim nano micro htop btop ranger
+  networkmanager network-manager-applet
+  pipewire pipewire-pulse pipewire-alsa pipewire-jack wireplumber pavucontrol
+  xdg-user-dirs xdg-utils
+  feh rofi dmenu lxappearance
   alacritty kitty
   firefox chromium
   thunar thunar-volman file-roller gvfs gvfs-mtp
-  mpv vlc xfce4-taskmanager
   bluez bluez-utils blueman
-  pipewire pipewire-alsa pipewire-pulse pipewire-jack wireplumber pavucontrol
-  neovim nano micro htop btop ranger
+  mpv vlc xfce4-taskmanager
   ttf-dejavu ttf-liberation noto-fonts noto-fonts-cjk noto-fonts-emoji
-  zsh lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings
-  exa bat
+  zsh
+
+  # Xorg + драйвера
+  xorg xorg-xinit xorg-server mesa mesa-demos
+  vulkan-icd-loader
+  vulkan-radeon lib32-vulkan-radeon
+  vulkan-intel lib32-vulkan-intel
+  nvidia nvidia-utils nvidia-settings lib32-nvidia-utils nvidia-prime
+  amd-ucode intel-ucode
+
+  # BSPWM
+  bspwm sxhkd polybar picom
+
+  # Hyprland
+  hyprland waybar foot
+  xdg-desktop-portal xdg-desktop-portal-hyprland
+  grim slurp wl-clipboard
+  qt5-wayland qt6-wayland gtk3 gtk4
+
+  # LightDM
+  lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings
 )
 
 for pkg in "${PACKAGES[@]}"; do
@@ -31,21 +51,25 @@ done
 
 echo ">>> Чистим конфиги..."
 rm -rf ~/.config/{bspwm,sxhkd,polybar,picom,hypr}
+rm -rf ~/.config/hypr
 rm -rf ~/.oh-my-zsh ~/.p10k.zsh
 rm -f ~/.zshrc
 rm -rf ~/Pictures/wallpapers
 
 echo ">>> Удаляем Exodia темы, иконки, обои..."
-sudo rm -rf /usr/share/themes/exodia* /usr/share/icons/exodia* /usr/share/backgrounds/exodia*
+sudo rm -rf /usr/share/themes/exodia* \
+            /usr/share/icons/exodia* \
+            /usr/share/backgrounds/*exodia*
+
+echo ">>> Удаляем desktop entries..."
+sudo rm -f /usr/share/xsessions/bspwm.desktop
+sudo rm -f /usr/share/wayland-sessions/hyprland.desktop
 
 echo ">>> Возвращаем bash по умолчанию..."
 chsh -s /bin/bash
 
 echo ">>> Отключаем LightDM..."
 sudo systemctl disable lightdm || true
-if pacman -Qi lightdm &>/dev/null; then
-  sudo pacman -Rns --noconfirm lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings
-fi
 
 echo ">>> Очистка завершена!"
 echo "Перезагрузи систему: sudo reboot"
